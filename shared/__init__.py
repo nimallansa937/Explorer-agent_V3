@@ -31,6 +31,22 @@ from .adapters import (
     ExplorerAdapter,
     LSMAdapter,
     HinanceAdapter,
+    HSGAdapter,
+)
+
+from .hierarchical_genome import (
+    HierarchicalGenome,
+    StructuralMode,
+    SlotCategory,
+    StateBus,
+    StateBusConfig,
+    DecisionTree,
+    TreeNode,
+    SignalStruct,
+    TradeSignal,
+    create_flat_genome,
+    create_dual_genome,
+    create_full_genome,
 )
 
 from .features import (
@@ -39,6 +55,18 @@ from .features import (
     extract_features,
     validate_features,
     FeatureVector,
+)
+
+from .feature_registry import (
+    FeatureStatus,
+    DataClass,
+    MaturityDecision,
+    FeatureDefinition,
+    TrialRecord,
+    FeatureRegistry,
+    FeatureProjector,
+    FeatureMaturityPipeline,
+    ShadowReEvolution,
 )
 
 from .constants import (
@@ -76,6 +104,21 @@ __all__ = [
     'ExplorerAdapter',
     'LSMAdapter',
     'HinanceAdapter',
+    'HSGAdapter',
+
+    # Hierarchical Strategy Graph (v2.0)
+    'HierarchicalGenome',
+    'StructuralMode',
+    'SlotCategory',
+    'StateBus',
+    'StateBusConfig',
+    'DecisionTree',
+    'TreeNode',
+    'SignalStruct',
+    'TradeSignal',
+    'create_flat_genome',
+    'create_dual_genome',
+    'create_full_genome',
 
     # Features
     'FEATURE_SCHEMA',
@@ -83,6 +126,17 @@ __all__ = [
     'extract_features',
     'validate_features',
     'FeatureVector',
+
+    # Feature Registry (v2.0)
+    'FeatureStatus',
+    'DataClass',
+    'MaturityDecision',
+    'FeatureDefinition',
+    'TrialRecord',
+    'FeatureRegistry',
+    'FeatureProjector',
+    'FeatureMaturityPipeline',
+    'ShadowReEvolution',
 
     # Constants
     'DEFAULT_DSR_THRESHOLD',
@@ -99,4 +153,4 @@ __all__ = [
     'VIX_ELEVATED_THRESHOLD',
 ]
 
-__version__ = '1.0.0'
+__version__ = '2.0.0'

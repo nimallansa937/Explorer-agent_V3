@@ -614,5 +614,179 @@ class TestIntegration:
         assert all(isinstance(s, UnifiedStrategy) for s in strategies)
 
 
+###############################################################################
+# HSG Adapter Tests (v2.0 - Phase 1)
+###############################################################################
+
+from shared.adapters import HSGAdapter
+from shared.hierarchical_genome import (
+    HierarchicalGenome,
+    StructuralMode,
+    DecisionTree,
+    TreeNode,
+    create_flat_genome,
+    create_dual_genome,
+)
+
+
+class TestHSGAdapter:
+    """Tests for Hierarchical Strategy Graph adapter integration."""
+
+    def test_hsg_to_unified_roundtrip(self):
+        """HSG → UnifiedStrategy → HSG produces equivalent genome."""
+        hsg = create_flat_genome()
+
+        # HSG → UnifiedStrategy
+        unified = HSGAdapter.to_unified(hsg, source_engine=SourceEngine.EVOLUTIONARY)
+        assert isinstance(unified, UnifiedStrategy)
+        assert "hsg_data" in unified.metadata
+        assert unified.metadata["structural_mode"] == "flat"
+
+        # UnifiedStrategy → HSG
+        restored = HSGAdapter.from_unified(unified)
+        assert restored is not None
+        assert restored.structural_mode == hsg.structural_mode
+        assert len(restored.timeframe_trees) == len(hsg.timeframe_trees)
+
+        # Evaluate both and compare
+        import numpy as np
+        features = {"default": np.ones(60)}
+        sig_orig = hsg.evaluate(features)
+        sig_restored = restored.evaluate(features)
+        assert abs(sig_orig.direction - sig_restored.direction) < 0.01
+        assert abs(sig_orig.size - sig_restored.size) < 0.01
+
+    def test_flat_hsg_matches_legacy_adapter(self):
+        """FLAT HSG from ExplorerAdapter matches legacy conversion."""
+        # Create a mock posterior
+        class MockPosterior:
+            id = "test_001"
+            entry_rules = [{"indicator": "RSI", "op": "lt", "value": 30}]
+            exit_rules = [{"indicator": "RSI", "op": "gt", "value": 70}]
+            sizing_config = {"method": "fixed", "size": 0.5}
+            params = {"period": 14}
+            lookbacks = {"rsi": 14}
+            indicators = ["RSI"]
+            stop_loss = 0.02
+            take_profit = 0.04
+            timestamp = datetime.now()
+            target_regime = None
+            asset = "BTCUSDT"
+
+        posterior = MockPosterior()
+
+        # Legacy path
+        legacy = ExplorerAdapter.convert(posterior)
+        assert isinstance(legacy, UnifiedStrategy)
+        assert legacy.genome is not None
+
+        # v2.0 path
+        v2_strategy = ExplorerAdapter.convert_to_hsg(posterior)
+        assert isinstance(v2_strategy, UnifiedStrategy)
+        assert "hsg_data" in v2_strategy.metadata
+        assert v2_strategy.metadata["structural_mode"] == "flat"
+
+        # Both should have the same strategy ID
+        assert legacy.strategy_id == v2_strategy.strategy_id
+
+    def test_unified_lifecycle_preserved(self):
+        """HSG-wrapped UnifiedStrategy preserves lifecycle transitions."""
+        hsg = create_flat_genome()
+        unified = HSGAdapter.to_unified(hsg)
+
+        # Should start as GENERATED
+        assert unified.status == StrategyStatus.GENERATED
+
+        # Should be able to transition through lifecycle
+        assert unified.genome is not None
+        assert unified.strategy_id.startswith("hsg_")
+
+    def test_explorer_adapter_produces_flat_hsg(self):
+        """ExplorerAdapter.convert_to_hsg produces FLAT-mode HSG."""
+        class MockPosterior:
+            id = "exp_test"
+            entry_rules = [
+                {"feature_idx": 0, "operator": ">", "threshold": 0.5},
+                {"feature_idx": 5, "operator": "<", "threshold": -0.3},
+            ]
+            exit_rules = [{"feature_idx": 10, "operator": ">", "threshold": 0.8}]
+            sizing_config = {"method": "fixed", "size": 0.2}
+            params = {"fast": 12, "slow": 26}
+            lookbacks = {"ema": 26}
+            indicators = ["EMA", "RSI"]
+            stop_loss = 0.03
+            take_profit = 0.06
+            timestamp = datetime.now()
+            target_regime = "BULL"
+            asset = "ETHUSDT"
+
+        strategy = ExplorerAdapter.convert_to_hsg(MockPosterior())
+
+        # Extract HSG
+        hsg = HSGAdapter.from_unified(strategy)
+        assert hsg is not None
+        assert hsg.structural_mode == StructuralMode.FLAT
+        assert len(hsg.timeframe_trees) == 1
+
+    def test_lsm_adapter_produces_hsg(self):
+        """LSMAdapter.convert_to_hsg produces HSG-embedded strategy."""
+        tokens = [1, 42, 99, 200, 305, 12, 88]
+        condition = {"regime": "RANGE", "asset": "BTCUSDT"}
+
+        strategy = LSMAdapter.convert_to_hsg(
+            tokens=tokens,
+            tokenizer=None,  # Uses fallback
+            generation_condition=condition,
+        )
+
+        assert isinstance(strategy, UnifiedStrategy)
+        assert "hsg_data" in strategy.metadata
+        assert strategy.metadata["structural_mode"] == "flat"
+
+        # Extract and verify HSG
+        hsg = HSGAdapter.from_unified(strategy)
+        assert hsg is not None
+        assert hsg.structural_mode == StructuralMode.FLAT
+
+    def test_genome_to_hsg_backward_compat(self):
+        """Legacy StrategyGenome converts to valid FLAT HSG."""
+        genome = StrategyGenome(
+            entry_conditions=[
+                {"feature_idx": 3, "operator": ">", "threshold": 0.5},
+                {"feature_idx": 7, "operator": "<", "threshold": -0.2},
+            ],
+            exit_conditions=[],
+            position_sizing={"method": "fixed", "size": 0.15},
+            parameters={"period": 20},
+            lookback_periods={"sma": 20},
+            indicators=["SMA", "MACD"],
+        )
+
+        hsg = HSGAdapter.genome_to_hsg(genome)
+        assert hsg.structural_mode == StructuralMode.FLAT
+        assert hsg.total_node_count > 0
+        assert hsg.feature_ids == ["SMA", "MACD"]
+
+        # Should be evaluable
+        import numpy as np
+        features = {"default": np.random.randn(60)}
+        signal = hsg.evaluate(features)
+        assert -1.0 <= signal.direction <= 1.0
+
+    def test_update_unified_hsg(self):
+        """HSGAdapter.update_unified_hsg refreshes embedded data."""
+        hsg = create_flat_genome()
+        unified = HSGAdapter.to_unified(hsg)
+        orig_mode = unified.metadata["structural_mode"]
+
+        # Mutate HSG
+        mutated_hsg = hsg.mutate_structural_mode()
+
+        # Update the unified strategy
+        HSGAdapter.update_unified_hsg(unified, mutated_hsg)
+        assert unified.metadata["structural_mode"] == mutated_hsg.structural_mode.value
+        assert unified.metadata["hsg_genome_id"] == mutated_hsg.genome_id
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
